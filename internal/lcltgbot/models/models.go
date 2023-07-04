@@ -1,7 +1,8 @@
 package models
 
 type BotData struct {
-	Key string
+	Key       string `json:"key"`
+	SecretKey string `json:"secretKey"`
 }
 
 func NewBotData(key string) *BotData {
@@ -9,14 +10,15 @@ func NewBotData(key string) *BotData {
 }
 
 type Advertisement struct {
+	Id          int64
 	Title       string
 	Description string
 	Price       float64
 	City        string
 }
 
-func NewAdvertisement(title string, description string, price float64, city string) *Advertisement {
-	return &Advertisement{Title: title, Description: description, Price: price, City: city}
+func NewAdvertisement(id int64, title string, description string, price float64, city string) *Advertisement {
+	return &Advertisement{Id: id, Title: title, Description: description, Price: price, City: city}
 }
 
 type BotState int8
@@ -30,6 +32,7 @@ const (
 )
 
 type BotContext struct {
+	Id            int64
 	IsInFlow      bool
 	Advertisement *Advertisement
 	State         BotState
