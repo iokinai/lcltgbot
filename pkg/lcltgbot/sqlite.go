@@ -20,19 +20,17 @@ func NewSqliteDb() *SqliteDb {
 		log.Fatal(err)
 	}
 
-	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS temp_ads (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, title VARCHAR(255), description TEXT, price DOUBLE, city TEXT)"); err != nil {
-		log.Fatal(err)
-	}
-
-	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS temp_contexts (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, is_in_flow INTEGER, ad_id INTEGER, state INTEGER, FOREIGN KEY(ad_id) REFERENCES temp_ads(id))"); err != nil {
-		log.Fatal(err)
-	}
-
-	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS users (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, chat_id INTEGER UNIQUE, context_id INTEGER, FOREIGN KEY(context_id) REFERENCES temp_contexts(id))"); err != nil {
-		log.Fatal(err)
-	}
+	CreateTableOrError(db, "temp_ads (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, title VARCHAR(255), description TEXT, price DOUBLE, city TEXT, editing BOOLEAN)")
+	CreateTableOrError(db, "temp_contexts (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, is_in_flow INTEGER, ad_id INTEGER, state INTEGER, FOREIGN KEY(ad_id) REFERENCES temp_ads(id))")
+	CreateTableOrError(db, "users (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, chat_id INTEGER UNIQUE, context_id INTEGER, FOREIGN KEY(context_id) REFERENCES temp_contexts(id))")
 
 	return &SqliteDb{db: db}
+}
+
+func CreateTableOrError(db *sql.DB, data string) {
+	if _, err := db.Exec(fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s", data)); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func (s *SqliteDb) Register(chatid int64) (*models.User, error) {
@@ -74,7 +72,7 @@ func (s *SqliteDb) CreateContext(isInFlow bool, ad *models.Advertisement, state 
 }
 
 func (s *SqliteDb) CreateAd(title string, description string, price float64, city string) (*models.Advertisement, error) {
-	result, err := s.db.Exec("INSERT INTO temp_ads(title, description, price, city) VALUES (?, ?, ?, ?)", title, description, price, city)
+	result, err := s.db.Exec("INSERT INTO temp_ads(title, description, price, city, editing) VALUES (?, ?, ?, ?, ?)", title, description, price, city, false)
 
 	if err != nil {
 		return nil, err
@@ -86,7 +84,7 @@ func (s *SqliteDb) CreateAd(title string, description string, price float64, cit
 		return nil, err
 	}
 
-	return models.NewAdvertisement(id, title, description, price, city), nil
+	return models.NewAdvertisement(id, title, description, price, city, false), nil
 }
 
 func (s *SqliteDb) GetUser(chatid int64) (*models.User, error) {
@@ -137,6 +135,7 @@ func (s *SqliteDb) GetAd(id sql.NullInt64) (*models.Advertisement, error) {
 		description string
 		price       float64
 		city        string
+		editing     bool
 	)
 
 	adrows, err := s.GetRowsById("SELECT * FROM temp_ads WHERE id = ?", id.Int64)
@@ -146,7 +145,7 @@ func (s *SqliteDb) GetAd(id sql.NullInt64) (*models.Advertisement, error) {
 	}
 
 	for adrows.Next() {
-		if err := adrows.Scan(&adId, &title, &description, &price, &city); err != nil {
+		if err := adrows.Scan(&adId, &title, &description, &price, &city, &editing); err != nil {
 			return nil, err
 		}
 		loaded = true
@@ -156,7 +155,7 @@ func (s *SqliteDb) GetAd(id sql.NullInt64) (*models.Advertisement, error) {
 		return nil, errors.New("no values in DB")
 	}
 
-	return models.NewAdvertisement(adId, title, description, price, city), nil
+	return models.NewAdvertisement(adId, title, description, price, city, editing), nil
 }
 
 func (s *SqliteDb) GetContext(id sql.NullInt64) (*models.BotContext, error) {
@@ -232,20 +231,29 @@ func (s *SqliteDb) ChangeUserState(user *models.User, state models.BotState) (*m
 	return user, nil
 }
 
-func (s *SqliteDb) ChangeAdTitle(user *models.User, title string) error {
-	return s.ChangeAdParam(user, title, "title")
+func (s *SqliteDb) ChangeAdTitle(user *models.User, title string) (*models.User, error) {
+	user.Context.Advertisement.Title = title
+	return user, s.ChangeAdParam(user, title, "title")
 }
 
-func (s *SqliteDb) ChangeAdDescription(user *models.User, descr string) error {
-	return s.ChangeAdParam(user, descr, "description")
+func (s *SqliteDb) ChangeAdDescription(user *models.User, descr string) (*models.User, error) {
+	user.Context.Advertisement.Description = descr
+	return user, s.ChangeAdParam(user, descr, "description")
 }
 
-func (s *SqliteDb) ChangeAdPrice(user *models.User, price float64) error {
-	return s.ChangeAdParam(user, price, "price")
+func (s *SqliteDb) ChangeAdPrice(user *models.User, price float64) (*models.User, error) {
+	user.Context.Advertisement.Price = price
+	return user, s.ChangeAdParam(user, price, "price")
 }
 
-func (s *SqliteDb) ChangeAdCity(user *models.User, city string) error {
-	return s.ChangeAdParam(user, city, "city")
+func (s *SqliteDb) ChangeAdCity(user *models.User, city string) (*models.User, error) {
+	user.Context.Advertisement.City = city
+	return user, s.ChangeAdParam(user, city, "city")
+}
+
+func (s *SqliteDb) ChangeAdEditing(user *models.User, editing bool) (*models.User, error) {
+	user.Context.Advertisement.Editing = editing
+	return user, s.ChangeAdParam(user, editing, "editing")
 }
 
 func (s *SqliteDb) ChangeAdParam(user *models.User, param any, paramname string) error {

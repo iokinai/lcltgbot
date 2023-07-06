@@ -42,6 +42,8 @@ func (a *App) HandleUpdate(update tgbotapi.Update) {
 			log.Fatal(err)
 		}
 	} else if update.CallbackQuery != nil {
-		a.handlers.HandleCallbackQuery(update.CallbackQuery)
+		if err := a.handlers.HandleCallbackQuery(update.CallbackQuery); err != nil {
+			return
+		}
 	}
 }
