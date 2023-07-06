@@ -18,7 +18,7 @@ func FormatAdToMessageString(advertisement *models.Advertisement, username strin
 
 <i>г. %s</i>
 
-Писать в: @%s
+Писать в: %s
 			
 	`, advertisement.Title, advertisement.Description, humanize.FormatFloat("# ###.##", advertisement.Price), advertisement.City, username)
 }

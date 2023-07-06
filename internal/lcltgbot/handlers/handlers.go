@@ -245,6 +245,10 @@ func (h *Handlers) DropUserState(user *models.User) (*models.User, error) {
 }
 
 func (h *Handlers) CreateNewAdMessage(user *models.User, username string, parsemode string) tgbotapi.MessageConfig {
+	if DEBUG {
+		username = "<b>недоступно</b>"
+	}
+
 	message := tgbotapi.NewMessage(user.Chatid, formatters.FormatAdToMessageString(user.Context.Advertisement, username))
 	message.ParseMode = parsemode
 	message.ReplyMarkup = h.GetPreviewMarkup(username)
