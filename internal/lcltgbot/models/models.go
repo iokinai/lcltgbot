@@ -1,12 +1,14 @@
 package models
 
-type BotData struct {
-	Key       string `json:"key"`
-	SecretKey string `json:"secretKey"`
+type AppSettings struct {
+	Key               string `json:"key"`
+	SecretKey         string `json:"secretKey"`
+	ManageChannelLink string `json:"manageChannelLink"`
+	DatabasePath      string `json:"databasePath"`
 }
 
-func NewBotData(key string) *BotData {
-	return &BotData{Key: key}
+func NewBotData(key string) *AppSettings {
+	return &AppSettings{Key: key}
 }
 
 type Advertisement struct {
@@ -40,12 +42,13 @@ type BotContext struct {
 }
 
 type User struct {
-	Chatid  int64
-	Context *BotContext
+	Chatid   int64
+	Username string
+	Context  *BotContext
 }
 
-func NewUser(chatid int64, context *BotContext) *User {
-	return &User{Chatid: chatid, Context: context}
+func NewUser(chatid int64, username string, context *BotContext) *User {
+	return &User{Chatid: chatid, Username: username, Context: context}
 }
 
 type ParamPair struct {
@@ -55,4 +58,19 @@ type ParamPair struct {
 
 func NewParamPair(paramName string, paramValue any) *ParamPair {
 	return &ParamPair{ParamName: paramName, ParamValue: paramValue}
+}
+
+type TextSettings struct {
+	Start             string `json:"start"`
+	WrongCommand      string `json:"wrongCommand"`
+	InChainError      string `json:"inChainError"`
+	ChainCanceled     string `json:"chainCanceled"`
+	AdGuide           string `json:"adGuide"`
+	EnterDescription  string `json:"enterDescription"`
+	EnterPrice        string `json:"enterPrice"`
+	EnterCity         string `json:"enterCity"`
+	AdPreview         string `json:"adPreview"`
+	Hidden            string `json:"hidden"`
+	NewParameterValue string `json:"newParameterValue"`
+	AccessOnlyByKey   string `json:"accessOnlyByKey"`
 }

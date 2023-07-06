@@ -10,11 +10,12 @@ import (
 )
 
 type SqliteDb struct {
-	db *sql.DB
+	db       *sql.DB
+	settings *models.AppSettings
 }
 
-func NewSqliteDb() *SqliteDb {
-	db, err := sql.Open("sqlite3", "lcl.sqlite")
+func NewSqliteDb(settings *models.AppSettings) *SqliteDb {
+	db, err := sql.Open("sqlite3", settings.DatabasePath)
 
 	if err != nil {
 		log.Fatal(err)
@@ -22,9 +23,9 @@ func NewSqliteDb() *SqliteDb {
 
 	CreateTableOrError(db, "temp_ads (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, title VARCHAR(255), description TEXT, price DOUBLE, city TEXT, editing BOOLEAN)")
 	CreateTableOrError(db, "temp_contexts (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, is_in_flow INTEGER, ad_id INTEGER, state INTEGER, FOREIGN KEY(ad_id) REFERENCES temp_ads(id))")
-	CreateTableOrError(db, "users (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, chat_id INTEGER UNIQUE, context_id INTEGER, FOREIGN KEY(context_id) REFERENCES temp_contexts(id))")
+	CreateTableOrError(db, "users (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, chat_id INTEGER UNIQUE, username TEXT UNIQUE, context_id INTEGER, FOREIGN KEY(context_id) REFERENCES temp_contexts(id))")
 
-	return &SqliteDb{db: db}
+	return &SqliteDb{db: db, settings: settings}
 }
 
 func CreateTableOrError(db *sql.DB, data string) {
@@ -33,7 +34,7 @@ func CreateTableOrError(db *sql.DB, data string) {
 	}
 }
 
-func (s *SqliteDb) Register(chatid int64) (*models.User, error) {
+func (s *SqliteDb) Register(chatid int64, username string) (*models.User, error) {
 	emptyad, err := s.CreateAd("", "", 0, "")
 
 	if err != nil {
@@ -46,13 +47,13 @@ func (s *SqliteDb) Register(chatid int64) (*models.User, error) {
 		return nil, err
 	}
 
-	_, err = s.db.Exec("INSERT INTO users(chat_id, context_id) VALUES (?, ?)", chatid, emptyctx.Id)
+	_, err = s.db.Exec("INSERT INTO users(chat_id, username, context_id) VALUES (?, ?, ?)", chatid, username, emptyctx.Id)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return models.NewUser(chatid, emptyctx), nil
+	return models.NewUser(chatid, username, emptyctx), nil
 }
 
 func (s *SqliteDb) CreateContext(isInFlow bool, ad *models.Advertisement, state models.BotState) (*models.BotContext, error) {
@@ -99,11 +100,12 @@ func (s *SqliteDb) GetUser(chatid int64) (*models.User, error) {
 	var (
 		userId     int
 		chatId     int
+		username   string
 		ucontextId sql.NullInt64
 	)
 
 	for userrows.Next() {
-		if err := userrows.Scan(&userId, &chatId, &ucontextId); err != nil {
+		if err := userrows.Scan(&userId, &chatId, &username, &ucontextId); err != nil {
 			return nil, err
 		}
 		loaded = true
@@ -119,7 +121,7 @@ func (s *SqliteDb) GetUser(chatid int64) (*models.User, error) {
 		return nil, err
 	}
 
-	return models.NewUser(chatid, context), nil
+	return models.NewUser(chatid, username, context), nil
 }
 
 func (s *SqliteDb) GetAd(id sql.NullInt64) (*models.Advertisement, error) {

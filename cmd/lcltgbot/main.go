@@ -12,35 +12,57 @@ import (
 )
 
 func main() {
-	db := lcltgbot.NewSqliteDb()
 
-	botdatafile, err := os.Open("botdata.json")
+	settings := GetSettings()
+	textsettings := GetText()
 
-	if err != nil {
-		log.Fatal(err)
-	}
+	db := lcltgbot.NewSqliteDb(settings)
 
-	jsondecoder := json.NewDecoder(botdatafile)
-
-	var botdata models.BotData
-
-	if err = jsondecoder.Decode(&botdata); err != nil {
-		log.Fatal(err)
-	}
+	api, err := tgbotapi.NewBotAPI(settings.Key)
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	api, err := tgbotapi.NewBotAPI(botdata.Key)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	handl := handlers.NewHandlers(api, db, botdata.SecretKey)
+	handl := handlers.NewHandlers(api, db, settings, textsettings)
 
 	application := app.New(api, handl)
 
 	application.Start()
+}
+
+func GetSettings() *models.AppSettings {
+	botdatafile, err := os.Open("appsettings.json")
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	settingsdecoder := json.NewDecoder(botdatafile)
+
+	var botdata models.AppSettings
+
+	if err = settingsdecoder.Decode(&botdata); err != nil {
+		log.Fatal(err)
+	}
+
+	return &botdata
+}
+
+func GetText() *models.TextSettings {
+	textsettingsfile, err := os.Open("assets/translations/ru.json")
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	settingsdecoder := json.NewDecoder(textsettingsfile)
+
+	var textSettings models.TextSettings
+
+	if err = settingsdecoder.Decode(&textSettings); err != nil {
+		log.Fatal(err)
+	}
+
+	return &textSettings
 }

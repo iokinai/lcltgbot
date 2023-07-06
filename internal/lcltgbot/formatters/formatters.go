@@ -6,7 +6,17 @@ import (
 	"github.com/iokinai/lcltgbot/internal/lcltgbot/models"
 )
 
+const DEBUG = true
+
 func FormatAdToMessageString(advertisement *models.Advertisement, username string) string {
+	debugmessage := ""
+
+	if DEBUG {
+		debugmessage = `
+<b>*юзернеймы пользователей скрыты в бета версии</b>
+`
+	}
+
 	return fmt.Sprintf(
 		`<b>%s</b>
 
@@ -19,6 +29,6 @@ func FormatAdToMessageString(advertisement *models.Advertisement, username strin
 <i>г. %s</i>
 
 Писать в: %s
-			
-	`, advertisement.Title, advertisement.Description, humanize.FormatFloat("# ###.##", advertisement.Price), advertisement.City, username)
+%s			
+	`, advertisement.Title, advertisement.Description, humanize.FormatFloat("# ###.##", advertisement.Price), advertisement.City, username, debugmessage)
 }

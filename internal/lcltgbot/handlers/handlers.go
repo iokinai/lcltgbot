@@ -15,7 +15,7 @@ import (
 const DEBUG = true
 
 type Database interface {
-	Register(chatid int64) (*models.User, error)
+	Register(chatid int64, username string) (*models.User, error)
 	GetUser(chatid int64) (*models.User, error)
 	ChangeUserState(user *models.User, state models.BotState) (*models.User, error)
 	ChangeAdTitle(user *models.User, title string) (*models.User, error)
@@ -26,13 +26,14 @@ type Database interface {
 }
 
 type Handlers struct {
-	bot  *tgbotapi.BotAPI
-	db   Database
-	skey string
+	bot      *tgbotapi.BotAPI
+	db       Database
+	settings *models.AppSettings
+	text     *models.TextSettings
 }
 
-func NewHandlers(bot *tgbotapi.BotAPI, db Database, skey string) *Handlers {
-	return &Handlers{bot: bot, db: db, skey: skey}
+func NewHandlers(bot *tgbotapi.BotAPI, db Database, settings *models.AppSettings, text *models.TextSettings) *Handlers {
+	return &Handlers{bot: bot, db: db, settings: settings, text: text}
 }
 
 func (h *Handlers) HandleMessage(message *tgbotapi.Message) error {
@@ -41,7 +42,7 @@ func (h *Handlers) HandleMessage(message *tgbotapi.Message) error {
 	user, err := h.db.GetUser(chatid)
 
 	if err != nil {
-		user, err = h.AskForKey(chatid, message)
+		user, err = h.AskForKey(message)
 
 		if err != nil {
 			return err
@@ -74,7 +75,7 @@ func (h *Handlers) HandleSingleCommand(user *models.User, message *tgbotapi.Mess
 			return err
 		}
 	default:
-		if err := h.SendMessage(user, "Команда или текст не распознаны и/или не подходят в этом контексте!"); err != nil {
+		if err := h.SendMessage(user, h.text.WrongCommand); err != nil {
 			return err
 		}
 	}
@@ -85,15 +86,15 @@ func (h *Handlers) HandleSingleCommand(user *models.User, message *tgbotapi.Mess
 func (h *Handlers) CheckIfFlowMessageIsValid(user *models.User, message *tgbotapi.Message) error {
 	if message.IsCommand() {
 		if message.Text != commands.CancelFlow {
-			h.SendMessage(user, fmt.Sprintf("Сейчас вы находитесь в \"цепи набора\". Использовать команды нельзя. Пройдите всю цепь или используйте %s, чтобы отменить цепь!", commands.CancelFlow))
-			return nil
+			h.SendMessage(user, fmt.Sprintf(h.text.InChainError, commands.CancelFlow))
+			return errors.New("wrong command")
 		}
 
 		if _, err := h.db.ChangeUserState(user, models.StateNONE); err != nil {
 			return err
 		}
 
-		if err := h.SendMessage(user, "Набор успешно отменен!"); err != nil {
+		if err := h.SendMessage(user, h.text.ChainCanceled); err != nil {
 			return err
 		}
 	}
@@ -102,12 +103,8 @@ func (h *Handlers) CheckIfFlowMessageIsValid(user *models.User, message *tgbotap
 }
 
 func (h *Handlers) HandleCommandFlow(user *models.User, message *tgbotapi.Message) error {
-	chatid := user.Chatid
-
-	username := message.From.UserName
-
 	if err := h.CheckIfFlowMessageIsValid(user, message); err != nil {
-		return err
+		return nil
 	}
 
 	switch user.Context.State {
@@ -120,9 +117,7 @@ func (h *Handlers) HandleCommandFlow(user *models.User, message *tgbotapi.Messag
 		if _, err := h.GoNextIfCreatingElseDropEditing(
 			user,
 			models.StateWaitingForCDescription,
-			chatid,
-			"Введите описание товара.\n\n\nПрим. цена и город будут указываться далее, писать их в описании нет необходимости",
-			username,
+			h.text.EnterDescription,
 		); err != nil {
 			return err
 		}
@@ -137,9 +132,7 @@ func (h *Handlers) HandleCommandFlow(user *models.User, message *tgbotapi.Messag
 		if _, err := h.GoNextIfCreatingElseDropEditing(
 			user,
 			models.StateWaitingForCPrice,
-			chatid,
-			"Введите цену товара (руб).\n\n\nПрим. обязательно число!",
-			username,
+			h.text.EnterPrice,
 		); err != nil {
 			return err
 		}
@@ -156,9 +149,7 @@ func (h *Handlers) HandleCommandFlow(user *models.User, message *tgbotapi.Messag
 		if _, err := h.GoNextIfCreatingElseDropEditing(
 			user,
 			models.StateWaitingForCCity,
-			chatid,
-			"Введите город.",
-			username,
+			h.text.EnterCity,
 		); err != nil {
 			return err
 		}
@@ -171,7 +162,7 @@ func (h *Handlers) HandleCommandFlow(user *models.User, message *tgbotapi.Messag
 		}
 
 		if !user.Context.Advertisement.Editing {
-			if err := h.SendPreview(user, message.From.UserName); err != nil {
+			if err := h.SendPreview(user); err != nil {
 				return err
 			}
 		}
@@ -179,9 +170,7 @@ func (h *Handlers) HandleCommandFlow(user *models.User, message *tgbotapi.Messag
 		if _, err := h.GoNextIfCreatingElseDropEditing(
 			user,
 			models.StateNONE,
-			chatid,
-			"Готово! Так будет выглядеть ваще объявление!",
-			username,
+			h.text.AdPreview,
 		); err != nil {
 			return err
 		}
@@ -190,7 +179,7 @@ func (h *Handlers) HandleCommandFlow(user *models.User, message *tgbotapi.Messag
 	return nil
 }
 
-func (h *Handlers) GoNextIfCreatingElseDropEditing(user *models.User, state models.BotState, chatid int64, messagetext string, username string) (*models.User, error) {
+func (h *Handlers) GoNextIfCreatingElseDropEditing(user *models.User, state models.BotState, messagetext string) (*models.User, error) {
 	if !user.Context.Advertisement.Editing {
 		user, err := h.db.ChangeUserState(user, state)
 
@@ -205,11 +194,11 @@ func (h *Handlers) GoNextIfCreatingElseDropEditing(user *models.User, state mode
 		return user, nil
 	}
 
-	return h.AfterEdited(user, username)
+	return h.AfterEdited(user)
 }
 
-func (h *Handlers) AfterEdited(user *models.User, username string) (*models.User, error) {
-	_, err := h.bot.Send(h.CreateNewAdMessage(user, username, tgbotapi.ModeHTML))
+func (h *Handlers) AfterEdited(user *models.User) (*models.User, error) {
+	_, err := h.bot.Send(h.CreateNewAdMessage(user, tgbotapi.ModeHTML))
 	if err != nil {
 		return nil, err
 	}
@@ -244,20 +233,22 @@ func (h *Handlers) DropUserState(user *models.User) (*models.User, error) {
 	return user, nil
 }
 
-func (h *Handlers) CreateNewAdMessage(user *models.User, username string, parsemode string) tgbotapi.MessageConfig {
+func (h *Handlers) CreateNewAdMessage(user *models.User, parsemode string) tgbotapi.MessageConfig {
+	username := user.Username
+
 	if DEBUG {
-		username = "<b>недоступно</b>"
+		username = h.text.Hidden
 	}
 
 	message := tgbotapi.NewMessage(user.Chatid, formatters.FormatAdToMessageString(user.Context.Advertisement, username))
 	message.ParseMode = parsemode
-	message.ReplyMarkup = h.GetPreviewMarkup(username)
+	message.ReplyMarkup = h.GetPreviewMarkup()
 
 	return message
 }
 
 func (h *Handlers) HandleStart(user *models.User) error {
-	if err := h.SendMessage(user, "STARTED [TEST]\n/add_ad - добавить объявление"); err != nil {
+	if err := h.SendMessage(user, h.text.Start); err != nil {
 		return err
 	}
 
@@ -265,7 +256,7 @@ func (h *Handlers) HandleStart(user *models.User) error {
 }
 
 func (h *Handlers) HandleAddAd(user *models.User) error {
-	if err := h.SendMessage(user, "Отлично!\nПроцесс создания объявления разбит на несколько частей:\nУстановка названия\nУстановка описания\nУстановка цены\nУстановка города\n\nВведите название:"); err != nil {
+	if err := h.SendMessage(user, h.text.AdGuide); err != nil {
 		return err
 	}
 
@@ -287,22 +278,26 @@ func (h *Handlers) SendMessage(user *models.User, text string) error {
 	return nil
 }
 
-func (h *Handlers) SendPreview(user *models.User, username string) error {
-	if _, err := h.bot.Send(h.CreateNewAdMessage(user, username, tgbotapi.ModeHTML)); err != nil {
+func (h *Handlers) SendPreview(user *models.User) error {
+	if _, err := h.bot.Send(h.CreateNewAdMessage(user, tgbotapi.ModeHTML)); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (h *Handlers) GetPreviewMarkup(username string) tgbotapi.InlineKeyboardMarkup {
+func (h *Handlers) GetPreviewMarkup() tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(commands.SendButtonPair.ParamName, fmt.Sprintf("%s:%s", commands.SendButtonPair.ParamValue, username)),
-			tgbotapi.NewInlineKeyboardButtonData(commands.ChangeTitleButton.ParamName, fmt.Sprintf("%s:%s:%d", commands.ChangeTitleButton.ParamValue, username, models.StateWaitingForCTitle)),
-			tgbotapi.NewInlineKeyboardButtonData(commands.ChangeDescriptionButton.ParamName, fmt.Sprintf("%s:%s:%d", commands.ChangeDescriptionButton.ParamValue, username, models.StateWaitingForCDescription)),
-			tgbotapi.NewInlineKeyboardButtonData(commands.ChangePriceButton.ParamName, fmt.Sprintf("%s:%s:%d", commands.ChangePriceButton.ParamValue, username, models.StateWaitingForCPrice)),
-			tgbotapi.NewInlineKeyboardButtonData(commands.ChangeCityButton.ParamName, fmt.Sprintf("%s:%s:%d", commands.ChangeCityButton.ParamValue, username, models.StateWaitingForCCity)),
+			tgbotapi.NewInlineKeyboardButtonData(commands.SendButtonPair.ParamName, (commands.SendButtonPair.ParamValue).(string)),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(commands.ChangeTitleButton.ParamName, fmt.Sprintf("%s:%d", commands.ChangeTitleButton.ParamValue, models.StateWaitingForCTitle)),
+			tgbotapi.NewInlineKeyboardButtonData(commands.ChangeDescriptionButton.ParamName, fmt.Sprintf("%s:%d", commands.ChangeDescriptionButton.ParamValue, models.StateWaitingForCDescription)),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(commands.ChangePriceButton.ParamName, fmt.Sprintf("%s:%d", commands.ChangePriceButton.ParamValue, models.StateWaitingForCPrice)),
+			tgbotapi.NewInlineKeyboardButtonData(commands.ChangeCityButton.ParamName, fmt.Sprintf("%s:%d", commands.ChangeCityButton.ParamValue, models.StateWaitingForCCity)),
 		),
 	)
 }
@@ -310,13 +305,7 @@ func (h *Handlers) GetPreviewMarkup(username string) tgbotapi.InlineKeyboardMark
 func (h *Handlers) HandleCallbackQuery(query *tgbotapi.CallbackQuery) error {
 	querydata := strings.Split(query.Data, ":")
 
-	if len(querydata) < 2 {
-		return errors.New("to low parameters for callback query")
-	}
-
 	user, err := h.db.GetUser(query.Message.Chat.ID)
-
-	username := querydata[1]
 
 	if err != nil {
 		return err
@@ -324,7 +313,7 @@ func (h *Handlers) HandleCallbackQuery(query *tgbotapi.CallbackQuery) error {
 
 	switch querydata[0] {
 	case commands.SendButtonPair.ParamValue:
-		message := tgbotapi.NewMessageToChannel("@lcltg", formatters.FormatAdToMessageString(user.Context.Advertisement, username))
+		message := tgbotapi.NewMessageToChannel(h.settings.ManageChannelLink, formatters.FormatAdToMessageString(user.Context.Advertisement, user.Username))
 		message.ParseMode = tgbotapi.ModeHTML
 
 		if DEBUG {
@@ -338,7 +327,7 @@ func (h *Handlers) HandleCallbackQuery(query *tgbotapi.CallbackQuery) error {
 
 		query.Message.ReplyMarkup = nil
 	case commands.ChangeValueCommandData:
-		statenum, err := strconv.Atoi(querydata[2])
+		statenum, err := strconv.Atoi(querydata[1])
 
 		if err != nil {
 			return err
@@ -355,7 +344,7 @@ func (h *Handlers) HandleCallbackQuery(query *tgbotapi.CallbackQuery) error {
 			return err
 		}
 
-		if err = h.SendMessage(user, "Введите новое значение параметра"); err != nil {
+		if err = h.SendMessage(user, h.text.NewParameterValue); err != nil {
 			return err
 		}
 	}
@@ -363,21 +352,19 @@ func (h *Handlers) HandleCallbackQuery(query *tgbotapi.CallbackQuery) error {
 	return nil
 }
 
-func (h *Handlers) AskForKey(chatid int64, message *tgbotapi.Message) (*models.User, error) {
-	if message.Text == h.skey {
-		user, err := h.db.Register(message.Chat.ID)
+func (h *Handlers) AskForKey(message *tgbotapi.Message) (*models.User, error) {
+	if message.Text == h.settings.SecretKey {
+		user, err := h.db.Register(message.Chat.ID, message.From.UserName)
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		if err := h.HandleStart(user); err != nil {
-			return nil, err
-		}
+		message.Text = commands.StartCommand
 
 		return user, nil
 	}
 
-	if err := h.SendMessage(models.NewUser(chatid, nil), "Доступ к боту разрешен только по ключу. Введите ключ!"); err != nil {
+	if err := h.SendMessage(models.NewUser(message.Chat.ID, "", nil), h.text.AccessOnlyByKey); err != nil {
 		return nil, err
 	}
 
